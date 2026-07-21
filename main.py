@@ -196,62 +196,78 @@ def parse_json(s):
 async def root():
     return {"ok": True, "email": config.EMAIL}
 
-# ================= Q3: /q3/answer =================
+# ================= Q3: /grounded-answer =================
 @app.post("/grounded-answer")
 async def q3_answer(request: Request):
     body = await request.json()
     question = body.get("question", "")
     chunks = body.get("chunks", [])
+
     prompt = (
         "You are a highly reliable Grounded QA API for medical and legal compliance.\n"
-        "Your task is to answer the user's question strictly using ONLY the provided context chunks.\n"
-        "1. If the question CANNOT be answered from the chunks, you MUST return:\n"
-        "   - answerable: false\n"
-        "   - answer: \"I don't know\" (exact match)\n"
-        "   - citations: [] (empty array)\n"
-        "   - confidence: 0.1\n"
-        "2. If it CAN be answered, return:\n"
-        "   - answerable: true\n"
-        "   - answer: <your grounded answer>\n"
-        "   - citations: [<list of ONLY the chunk_ids you used>]\n"
-        "   - confidence: <float between 0.8 and 1.0>\n"
-        "NEVER use outside knowledge. Return strictly JSON with exactly these 4 keys.\n\n"
+        "Answer ONLY using the provided chunks.\n"
+        "If the answer is not fully supported by the chunks, return:\n"
+        "{"
+        "\"answerable\": false,"
+        "\"answer\": \"I don't know\","
+        "\"citations\": [],"
+        "\"confidence\": 0.1"
+        "}\n"
+        "Otherwise return:\n"
+        "{"
+        "\"answerable\": true,"
+        "\"answer\": \"...\","
+        "\"citations\": [chunk_ids],"
+        "\"confidence\": 0.9"
+        "}\n\n"
         f"QUESTION:\n{question}\n\n"
         f"CHUNKS:\n{json.dumps(chunks, indent=2)}"
     )
+
     try:
-        out = parse_json(await chat([{"role": "user", "content": prompt}], model="gpt-4o-mini", max_tokens=1000))
+        out = parse_json(
+            await chat(
+                [{"role": "user", "content": prompt}],
+                model="gpt-4o-mini",
+                max_tokens=1000,
+            )
+        )
+
         valid_ids = {c["chunk_id"] for c in chunks}
-cites = [c for c in out.get("citations", []) if c in valid_ids]
+        citations = [
+            cid for cid in out.get("citations", [])
+            if cid in valid_ids
+        ]
 
-if (
-    not out.get("answerable", False)
-    or len(cites) == 0
-    or out.get("answer", "").strip().lower() == "i don't know"
-):
-    return {
-        "answer": "I don't know",
-        "citations": [],
-        "confidence": 0.1,
-        "answerable": False,
-    }
+        answer = str(out.get("answer", "")).strip()
 
-return {
-    "answer": out.get("answer", ""),
-    "citations": cites,
-    "confidence": min(1.0, max(0.8, float(out.get("confidence", 0.9)))),
-    "answerable": True,
-}
-        valid_ids = [c["chunk_id"] for c in chunks]
-        cites = [c for c in out.get("citations", []) if c in valid_ids]
+        if (
+            not out.get("answerable", False)
+            or answer.lower() == "i don't know"
+            or len(citations) == 0
+        ):
+            return {
+                "answerable": False,
+                "answer": "I don't know",
+                "citations": [],
+                "confidence": 0.1,
+            }
+
         return {
-            "answer": out.get("answer", "I don't know"),
-            "citations": cites,
+            "answerable": True,
+            "answer": answer,
+            "citations": citations,
             "confidence": float(out.get("confidence", 0.9)),
-            "answerable": True
         }
+
     except Exception:
-        return {"answer": "I don't know", "citations": [], "confidence": 0.1, "answerable": False}
+        return {
+            "answerable": False,
+            "answer": "I don't know",
+            "citations": [],
+            "confidence": 0.1,
+        }
+       
 
 # ================= Q4: /vector-search =================
 def cosine_sim(a, b):
