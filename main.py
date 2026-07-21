@@ -221,8 +221,27 @@ async def q3_answer(request: Request):
     )
     try:
         out = parse_json(await chat([{"role": "user", "content": prompt}], model="gpt-4o-mini", max_tokens=1000))
-        if not out.get("answerable", False) or out.get("confidence", 1.0) <= 0.3:
-            return {"answer": "I don't know", "citations": [], "confidence": 0.1, "answerable": False}
+        valid_ids = {c["chunk_id"] for c in chunks}
+cites = [c for c in out.get("citations", []) if c in valid_ids]
+
+if (
+    not out.get("answerable", False)
+    or len(cites) == 0
+    or out.get("answer", "").strip().lower() == "i don't know"
+):
+    return {
+        "answer": "I don't know",
+        "citations": [],
+        "confidence": 0.1,
+        "answerable": False,
+    }
+
+return {
+    "answer": out.get("answer", ""),
+    "citations": cites,
+    "confidence": min(1.0, max(0.8, float(out.get("confidence", 0.9)))),
+    "answerable": True,
+}
         valid_ids = [c["chunk_id"] for c in chunks]
         cites = [c for c in out.get("citations", []) if c in valid_ids]
         return {
